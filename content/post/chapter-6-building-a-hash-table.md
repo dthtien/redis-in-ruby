@@ -135,7 +135,7 @@ _listing 6.2: Pseudo-code hash table_
 
 The previous pseudo code section shows five functions, the first one is `new_node`. This function acts as the entry point of a linked list. A node contains a key, a value, and a next node value. If the next node value is null, the element is the last one in the list.
 
-Appending an element to such list is done by first creating a single node list and then a second one, with the `next_node` value set to the first one:
+Prepending — a fancy word for "adding at the beginning" — an element to such list is done by first creating a single node list and then a second one, with the `next_node` value set to the first one:
 
 ```
 first_node = new_node(k1, v1, null)
@@ -146,16 +146,16 @@ In this example `first_node` is a list with a single node, and `two_node_list` i
 
 `update_node` works with an existing node and changes its value. It is a useful function when we find an existing pair with a matching key in `add_key_value_pair`. We explore this other function in more details below.
 
-`create_hash_table` does one thing, it allocates an array of arbitrary size. We purposefully do not define this function here. The size is not really important, as long as it creates a non empty array. The implementation of the allocation is also not really relevant to this example. Most operating systems provide such features, so it's therefore fair to assume that it would use the allocation operations provided by the operating system.
+`create_hash_table` does only one thing, it allocates an array of arbitrary size. We purposefully do not define this function here. The size is not really important, as long as it creates a non empty array. The implementation of the allocation is also not really relevant to this example. Most operating systems provide such features, it's therefore fair to assume that it would use the allocation operations provided by the operating system.
 
 `add_key_value_pair` does more work and let's walk through it, one line at a time. It takes three parameters, the table we want to insert the pair into, the key and the value.
-We first call `hash_function` with `key`. We'll dive deeper into what an implementation of `hash_function` looks like later, but for now, let's assume it returns an integer. Because the hash function is unaware of the size of the array, the returned value might be larger than the size.
+We first call `hash_function` with `key`. We'll dive deeper into what an implementation of `hash_function` looks like later, but for now, let's assume it returns an integer. Because the hash function is unaware of the size of the array, the returned value might be larger than the size of the array.
 
-We use the modulo operation to convert the hash value returned by `hash_function` into a number between 0 and `table.size - 1`. We can now use the result of the modulo operation as an index. That's why we have the `create_hash_table` function, to make sure that table is initialized with empty slots. These slots are often called buckets in hash table documentations.
+We use the modulo operation to convert the hash value returned by `hash_function` into a number between 0 and `table.size - 1`. We can now use the result of the modulo operation as an index. That's why we have the `create_hash_table` function, to make sure that table is initialized with empty slots. These slots are often called buckets in hash table lingo.
 
-There are two distinct cases to consider if there is already an item at the location obtained through the hash function. The existing key/value pair might be one with the same value, in this case we want to override its value with the new one.
+There are two distinct cases to consider if there is already an item at the location obtained through the hash function. One of the list nodes in the bucket might have the same key, in this case we want to override its value with the new value.
 
-The other one is that the node or nodes already present might be different, in which case we want to keep all the existing nodes and the new one. **This is called a collision**.
+The other one is that the nodes already present might all have a different key, in which case we want to keep all the existing nodes and the new one. **This is called a collision**.
 
 Let's illustrate with an example. Let's set the initial size of the array to 4, all the buckets are empty:
 
@@ -163,7 +163,7 @@ Let's illustrate with an example. Let's set the initial size of the array to 4, 
 table = [nil, nil, nil, nil]
 ```
 
-Let's define a hash function, that returns length of the string input:
+Let's define a hash function, that returns the length of the input string:
 
 ```
 function hash_function(string)
@@ -198,7 +198,7 @@ If we don't find any, the key is not present in the dictionary.
 
 The `hash_function` we used in the previous works well as an example because of its simplicity but it would not be practical in the real world. To keep hash tables efficient, we want to reduce the number of collisions as much as possible. This is because iterating through the linked list is inefficient, if there are a lot of collisions, it could take a long time to loop through all the items in the bucket.
 
-This is there the [uniformity property][wikipedia-hash-function-uniformity] of a hash function is really important. Uniformity helps reduce the likelihood of collision. In the previous example, if an hypothetical hash function had returned the values 1, 2 & 3, respectively, instead of 1, 2 & 2, there wouldn't have been any conflicts.
+This is where the [uniformity property][wikipedia-hash-function-uniformity] of a hash function is really important. Uniformity helps reduce the likelihood of collision. In the previous example, if a hypothetical hash function had returned the values 1, 2 & 3, respectively, instead of 1, 2 & 2, there wouldn't have been any conflicts.
 
 Collisions are also related to the size of the underlying array. Regardless of the uniformity of the hash function, if the underlying array has a size n, storing n + 1 items cannot happen without at least one collision.
 
@@ -230,7 +230,7 @@ def hash_function(object)
 end
 ```
 
-Let's manually walk through a small example, let's start by creating a hash table of size 3 and add the pair `a-key/a-value` to it. Let's re-use the same `object_id` from the same example, and assume that `a-key` would have returned 180. `180 % 3 = 0`, so we insert the new node at index 0:
+Let's manually walk through a small example, let's start by creating a hash table of size 3 and add the pair `a-key/a-value` to it. Let's re-use the same `object_id` from the previous example, and assume that `a-key` would have returned 180. `180 % 3 = 0`, so we insert the new node at index 0:
 
 ``` ruby
 table = [Node("a-key", "a-value", nil), nil, nil]
@@ -242,7 +242,7 @@ A deterministic hash function prevents this.
 
 **Common Hash Functions**
 
-In order for a hash table implementation to be efficient, it needs a good hash functions. Hash functions come in different flavors, as shown [on wikipedia][wikipedia-list-of-hash-functions]:
+In order for a hash table implementation to be efficient, it needs a good hash function. Hash functions come in different flavors, as shown [on wikipedia][wikipedia-list-of-hash-functions]:
 
 - Cyclic redundancy checks
 - Checksums
@@ -268,17 +268,17 @@ str1.hash # => 2242191710387986831
 str2.hash # => 2242191710387986831
 ```
 
-Now that we know what a hash function, how it used to implement a hash table, let's look at how Redis handles it.
+Now that we know what a hash function is, how it used to implement a hash table, let's look at how things work in Redis.
 
 ## How does Redis do it?
 
-http://blog.wjin.org/posts/redis-internal-data-structure-dictionary.html
+Redis uses 3 main data structures to implement a dictionary, `dict`, `dictht` & `dictEntry`, the following diagram, from [wjin.org][wjin-blog] shows how they each relate to each other:
 
-Redis uses 3 main data structures to implement a dictionary.
+![Diagram of Redis' dict data structure](/redis_dict.png)
 
 It's important to note that dictionaries are used in multiple places in the Redis codebase, but there are two main ones for each database, the one holding all the top-level key/value pairs, such as the ones added with `SET` and other commands creating pairs, and the `expires` dictionary, used to store key TTLs.
 
-If you're not used to C, don't worry too much about it for now, we're not going to look at pointers and other C specific features.
+If you're not used to C, don't worry too much about it for now, we're not going to look too closely at pointers and other C specific features.
 
 Our implementation supports a single database, but Redis can handle multiple databases. A database in Redis represents a set of key/value pairs. A database is defined as the following C struct:
 
@@ -313,7 +313,7 @@ typedef struct dict {
 ```
 _listing 6.4: The C struct for dict_
 
-The `dictType` is struct is used to configure the behavior of a `dict` instance, such as using a different hash function for instance. It is defined as:
+The `dictType` struct is used to configure the behavior of a `dict` instance, such as using a different hash function for instance. It is defined as:
 
 ``` c
 // https://github.com/antirez/redis/blob/6.0/src/dict.h#L58-L65
@@ -1545,3 +1545,4 @@ _listing 6.27: A Ruby implementation of the shiphash algorithm_
 [chapter-7]:/
 [siphash-gem]:https://github.com/emboss/siphash-ruby
 [scala-map]:https://github.com/scala/scala/blob/2.13.x/src/library/scala/collection/immutable/Map.scala#L241
+[wjin-blog]:http://blog.wjin.org/posts/redis-internal-data-structure-dictionary.html
