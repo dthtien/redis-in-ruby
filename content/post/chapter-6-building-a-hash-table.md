@@ -24,7 +24,7 @@ Let's get to it.
 
 ## Maps, Dictionaries, Associative Arrays
 
-This chapter covers hash tables, which is one way of implementing a data structure commonly called Map, Dictionary or Associate Array. I will use the term "Dictionary" as I find that "Map" can be confusing, especially when working with languages providing a `map` function/method, such as Ruby! From my experience the term associate array, while very explicitly, is not as common.
+This chapter covers hash tables, which is one way of implementing a data structure commonly called Map, Dictionary or Associate Array. I will use the term "Dictionary" as I find that "Map" can be confusing, especially when working with languages providing a `map` function/method, such as Ruby! From my experience the term associative array, while very explicit, is not as common.
 
 The basic definition of such data structure is one that holds zero or more key/value pairs, where a key cannot appear more than once.
 
@@ -65,6 +65,7 @@ lookup(map, "key-1") # => "value-1"
 lookup(map, "key-2") # => "value-2"
 lookup(map, "key-3") # => nil
 ```
+_listing 6.1: A basic dictionary using an array_
 
 This approach works from an API standpoint, but it would show performance issues as we keep adding elements to the array. Because we must prevent duplicated keys, we need to iterate through the whole array every time we attempt to add a new pair if the key is not already present.
 
@@ -72,15 +73,17 @@ A lookup might not always require a complete scan of the array, if we're lucky a
 
 For Redis, which should be able to handle hundreds of thousand of keys, even millions, these performance issues are not acceptable.
 
-One common implementation that addresses this performance issues is a hash table. Another possible implementation is the tree map, which uses a tree structure to store elements. The Java [`TreeMap`][java-doc-tree-map] uses a Red-Black tree. One benefits of a tree map compared to a hash map is that it stores elements in order, whereas a hash map does not.
+One common implementation that addresses these performance issues is a hash table. Another possible implementation is a tree map, which uses a tree structure to store elements. The Java [`TreeMap`][java-doc-tree-map] uses a Red-Black tree. One benefits of a tree map compared to a hash map is that it stores elements in order, whereas a hash map does not.
 
-In the next section we will learn how a hash tables implements these operations in a more time efficient manner.
+In the next section we will learn how hash tables implement these operations in a more time efficient manner.
 
-https://en.wikipedia.org/wiki/Associative_array
+Before moving on and abandoning this implementation, it's really important to note that while this implementation would not perform well with large collections, it might actually be one of the most efficient options for very small collections, such as with one or two pairs, thanks to its simplicity. If the array is small, finding an element requires very few steps and no memory overhead.
+
+As a matter of fact, the [Scala standard library][scala-map] does this for maps with up to four pairs, it has special case classes meant to handle these fixed sized maps, allowing them to be really fast as there's no need for hashing or anything else.
 
 ## Hash Tables
 
-Hash tables are available in many programming languages as part of their standard libraries. Python has `dict`, Java has `HashMap`, scala has `Map`, Elixir has `Maps`, Rust has `HashMap`, Ruby's `Hash` class is a hash table implementation too. You get it, they're almost everywhere.
+Hash tables are available in many programming languages as part of their standard libraries. Python has `dict`, Java has `HashMap`, Scala has `Map`, Elixir has `Map`, Rust has `HashMap`, Ruby's `Hash` class is a hash table implementation too. You get it, they're almost everywhere.
 
 Hash tables can be implemented in different ways, [the wikipedia article][wikipedia-hash-table] shows a few different examples. The one we'll explore in this chapter uses a collision resolution called separate chaining. But why do we need collision resolution? To answer this we first need to look at the central element of a hash table, its hash function.
 
@@ -128,6 +131,7 @@ function lookup_key(table, key)
 
         return null
 ```
+_listing 6.2: Pseudo-code hash table_
 
 The previous pseudo code section shows five functions, the first one is `new_node`. This function acts as the entry point of a linked list. A node contains a key, a value, and a next node value. If the next node value is null, the element is the last one in the list.
 
@@ -292,6 +296,7 @@ typedef struct redisDb {
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
 } redisDb;
 ```
+_listing 6.3: The C struct for redisDB_
 
 We will ignore all the fields but the first two for now. We can see that the two fields, `dict` & `expires` are both of the same type: `dict`.
 
@@ -306,6 +311,7 @@ typedef struct dict {
     unsigned long iterators; /* number of iterators currently running */
 } dict;
 ```
+_listing 6.4: The C struct for dict_
 
 The `dictType` is struct is used to configure the behavior of a `dict` instance, such as using a different hash function for instance. It is defined as:
 
@@ -320,6 +326,7 @@ typedef struct dictType {
     void (*valDestructor)(void *privdata, void *obj);
 } dictType;
 ```
+_listing 6.5: The C struct for dictType_
 
 This syntax is used to defined pointers to function. That's about as far as we'll go with C in this chapter. We don't need to change these values so we will not implement these features in our implementation.
 
@@ -338,6 +345,7 @@ typedef struct dictht {
     unsigned long used;
 } dictht;
 ```
+_listing 6.6: The C struct for dictht_
 
 The comment tells us why a dict has two tables, for rehashing. To explain rehashing, we first need to explain the first member of `dictht`: `dictEntry **table`. The double star syntax, a pointer to pointer, is not that interesting to us at the moment. What we do need to do is look at the `dictEntry` struct:
 
@@ -354,6 +362,7 @@ typedef struct dictEntry {
     struct dictEntry *next;
 } dictEntry;
 ```
+_listing 6.7: The C struct for dictEntry_
 
 `dictEntry` is a linked list, a common term for a structure like this one is "a node". It contains a key, `key`, a value, `v` and a link to the next element in the list, `next`.
 
@@ -422,6 +431,7 @@ dictEntry *dictFind(dict *d, const void *key)
     return NULL;
 }
 ```
+_listing 6.8: excerpt of dictFind_
 
 `h` is the value returned by the hash function and `d->ht[table].sizemask` is how Redis accesses the `sizemask` value for its hash table. `idx` is the index indicating the location of the bucket. Redis then looks into the array to inspect the bucket with `he = d->ht[table].table[idx]` (`he` stands for **h**ash **e**ntry).
 
@@ -452,6 +462,7 @@ int _dictInit(dict *d, dictType *type,
     return DICT_OK;
 }
 ```
+_listing 6.9: C code for \_dictReset & \_dictInit_
 
 Whenever Redis adds a new key/value pair to a dictionary, it first checks if the dictionary should be expanded. The main reason causing a dict to expand is if the number of items in it, the `used` member, is greater than or equal to the size of the dict, the `size` member. This will always be true for an empty dictionary since both are initialized to 0. This will also true every time the number of items reaches the size of the dict. When the dict is of size 4, once 4 items are added, the next addition will trigger a resize.
 
@@ -600,6 +611,7 @@ module Redis
   end
 end
 ```
+_listing 6.10: The DictEntry class_
 
 ``` ruby
 module Redis
@@ -627,6 +639,7 @@ module Redis
   end
 end
 ```
+_listing 6.11: The HashTable class_
 
 `@table` in `HashTable` will contain instances of `DictEntry`, this is our linked list implementation to handle collisions.
 
@@ -656,7 +669,7 @@ module Redis
     MAX_SIZE = 2**63
 
     attr_reader :hash_tables
-n
+
     def initialize
       @hash_tables = [ HashTable.new(0), HashTable.new(0) ]
       @rehashidx = -1
@@ -666,6 +679,7 @@ n
   end
 end
 ```
+_listing 6.12: The Dict class_
 
 Our `Dict` class does not require any arguments, it is initialized with two empty hash tables, and a rehash index set to `-1`, indicating that it is not in a rehashing state. The rehashing index is used to keep track of the progress throughout rehashing. Its value will change from `0` to `@hash_tables[0].size - 1` as we rehash the table, and reset to `-1` when completed.
 
@@ -701,6 +715,7 @@ module BYORedis
   end
 end
 ```
+_listing 6.13: The add method in the Dict class_
 
 The method is very similar to the pseudo code we looked at earlier in `add_key_value_pair`. We first obtain the index for the key, aka the location of the bucket the key should go into. We then perform a rehash step if we're in rehashing state.
 
@@ -811,6 +826,7 @@ module BYORedis
   end
 end
 ```
+_listing 6.14: helper methods in the Dict class_
 
 `main_table` and `rehashing_table` are used as aliases of `@hash_tables[0]` and `@hash_tables[1]`. `key_index` is used to return the index representing the location of the bucket for the given key. It first calls `expand_if_needed`, which we'll explore in the next section about rehashing. Once the dictionary has been resized if needed, it computes the hash value using the `SipHash` module. The code for the siphash algorithm is available in [Appendix B][appendix-b].
 
@@ -834,6 +850,7 @@ require 'securerandom'
 RANDOM_BYTES = SecureRandom.bytes(16)
 # ...
 ```
+_listing 6.15: Initialization of the random byte in server.rb_
 
 Now that we implemented the `add` function, and its alias, `[]=`, we need to add the `get` method, which will be used by the `GET` command, to retrieve an element from a dictionary based on its key.
 
@@ -877,6 +894,7 @@ module BYORedis
   end
 end
 ```
+_listing 6.16: get, include? and each method in Dict.rb_
 
 The `get` method starts with an early `return` statement if both tables are empty. If that's the case, there's no need to continue, we know the key is not present in the table.
 
@@ -922,6 +940,7 @@ module BYORedis
   end
 end
 ```
+_listing 6.17: expand_if_needed in the Dict class_
 
 If we are already in the process of rehashing the dict, then we can abort early, the process will continue incrementally, there's nothing else we should do until rehashing is over.
 If the table is empty we call `expand` with `INITIAL_SIZE`, which is set to `4`, otherwise we call it with a capacity set to twice the current size of the dictionary.
@@ -971,6 +990,7 @@ def rehashing?
   @rehashidx != -1
 end
 ```
+_listing 6.18: expand, next_power and rehashing? methods in the Dict class_
 
 Similarly to `resize`, if we're already in the process of rehashing, we can abort early. We also abort early is the number of items in the array is greater than the new size. In this case, there's no point in resizing the table, it would too small.
 
@@ -1034,6 +1054,7 @@ def rehash(n)
   end
 end
 ```
+_listing 6.19: rehashing related methods in the Dict class_
 
 `rehash_step` is a convenient method, it only calls `rehash` with the parameter 1. The parameter to `rehash` dictates how many items it will rehash, that is, move from the main table to the rehashing one. Let's look at the method one line at a time:
 
@@ -1105,6 +1126,7 @@ def ht_needs_resize(dict)
   size > Dict::INITIAL_SIZE && ((used * 100) / size < HASHTABLE_MIN_FILL)
 end
 ```
+_listing 6.20: databases_cron method in the Server class_
 
 `databases_cron` performs two operations on the two dictionaries in the `Server` class, `@data_store`, that holds all the key/value pairs, and `@expires` which keeps track of the keys with TTLs. For each of these dictionaries, if first calls `resize`, which we're explored in the previous section, only if it thinks the dictionary needs to be resized.
 
@@ -1152,6 +1174,7 @@ def resize
   expand(minimal)
 end
 ```
+_listing 6.21: rehash_milliseconds and resize methods in the Dict class_
 
 ### No more `Hash` & `{}`
 
@@ -1187,6 +1210,7 @@ module BYORedis
   end
 end
 ```
+_listing 6.22: Replacing usages of Hash with Dict in the Server class_
 
 ...
 
@@ -1228,6 +1252,7 @@ module BYORedis
   end
 end
 ```
+_listing 6.23: Replacing usages of Hash with Dict in the SetCommand class_
 
 ### Adding the `DEL` command
 
@@ -1277,6 +1302,7 @@ module Redis
   end
 end
 ```
+_listing 6.24: The new DelCommand class_
 
 The `DelCommand` class implements the behavior of the command, as well as defining the data for the `COMMAND` command, but it mainly relies on a non existing method on the `Dict` class, `delete`. Let's add it:
 
@@ -1309,6 +1335,7 @@ def delete(key)
   end
 end
 ```
+_listing 6.25: The delete method in the Dict class_
 
 ## Conclusion
 
@@ -1375,6 +1402,7 @@ class BYOArray < BasicObject
   end
 end
 ```
+_listing 6.26: A ruby implementation of an Array structure_
 
 ``` ruby
 ary = BYOArray.new(2)
@@ -1491,8 +1519,8 @@ module SipHash
 
   end
 end
-
 ```
+_listing 6.27: A Ruby implementation of the shiphash algorithm_
 
 [java-doc-tree-map]:https://docs.oracle.com/javase/8/docs/api/java/util/TreeMap.html
 [wikipedia-hash-table]:https://en.wikipedia.org/wiki/Hash_table
@@ -1516,3 +1544,4 @@ end
 [siphash-paper]:https://131002.net/siphash/siphash.pdf
 [chapter-7]:/
 [siphash-gem]:https://github.com/emboss/siphash-ruby
+[scala-map]:https://github.com/scala/scala/blob/2.13.x/src/library/scala/collection/immutable/Map.scala#L241
