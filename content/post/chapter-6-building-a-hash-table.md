@@ -12,13 +12,13 @@ summary: "In this chapter we will write our own hash table. This will allow to r
 
 So far we've been using the Ruby [`Hash`][ruby-doc-hash] class as the main storage mechanism for the key/value pairs received through the `SET` command. We also use it for the secondary dictionary necessary to implement the TTL related options of the `SET` command. We store the expiration timestamp of keys with TTLs, which allows us to know whether a key is expired or not.
 
-Redis is written in C, which does not provide a collection similar to Ruby's `Hash`. In C, the only collection you get out of the box is [arrays][c-doc-array].
+Redis is written in C, which does not provide a collection similar to Ruby's `Hash`. In C, you only get one collection out of the box, [arrays][c-doc-array].
 
-Redis implements its own dictionary collection, in [`dict.c`][github-link-dict]. Because the dictionary data structure is so central to how Redis functions, we will replace the use of the ruby `Hash` class with a `Dict` class we will build from scratch.
+Redis implements its own dictionary collection, in [`dict.c`][github-link-dict]. Because the dictionary data structure is so central to how Redis functions, we will replace the use of the Ruby `Hash` class with a `Dict` class we will build from scratch.
 
-We will also add the `DEL` command, which is a really important Redis command. Having the `DEL` command will allow us to easily play with our `Dict` class to make sure that it handles deletion operations correctly.
+We will also add the `DEL` command, the ability to delete keys is really important to Redis. Having the `DEL` command will also allow us to easily play with our `Dict` class to make sure that it handles deletion operations correctly.
 
-We are not adding any new features in this chapter, beside the `DEL` command, we're rewriting a key part of the system with lower level elements. Given that Redis' dict data structure relies on arrays, we will still use the ruby [`Array` class][ruby-doc-array]. We could have reimplemented the `Array` class, and you'll find an example in [Appendix A](#appendix-a-array-from-scratch-in-ruby), but arrays in C are not specific to Redis. On the other hand, the structure defined in [`dict.c`][github-link-dict] is.
+We are not adding any new features in this chapter, beside the `DEL` command, we're rewriting a key part of the system with lower level elements. Given that Redis' `dict` data structure relies on arrays, we will still use the Ruby [`Array` class][ruby-doc-array]. We could have reimplemented the `Array` class, and you'll find an example in [Appendix A](#appendix-a-array-from-scratch-in-ruby), but arrays in C are not specific to Redis. On the other hand, the structure defined in [`dict.c`][github-link-dict] is.
 
 Let's get to it.
 
@@ -32,7 +32,7 @@ A key operation (pun intended!) of a dictionary is the ability to retrieve a val
 
 Some definitions also include the ability to add, update or delete key/value pairs, which is not provided in immutable versions, where such operations would result in the creation of a new dictionary. The immutable versions will implement similar operations returning a new structure instead of modifying it.
 
-There are multiple ways of implementing a data structure providing these operations. A naive and inefficient version could be to use an array where each element is a key value pair:
+There are multiple ways of implementing a data structure providing these operations. A naive and fairly inefficient version could be to use an array where each element is a key value pair:
 
 ``` ruby
 def add(map, key, value)
@@ -55,7 +55,12 @@ def lookup(map, key)
   end
   return
 end
+```
+_listing 6.1: A basic dictionary using an array_
 
+Given these functions, `add` & `loopkup`, we could use them with an array:
+
+``` ruby
 map = []
 add(map, "key-1", "value-1") # => ["key-1", "value-1"]
 add(map, "key-2", "value-2") # => ["key-2", "value-2"]
@@ -65,25 +70,24 @@ lookup(map, "key-1") # => "value-1"
 lookup(map, "key-2") # => "value-2"
 lookup(map, "key-3") # => nil
 ```
-_listing 6.1: A basic dictionary using an array_
 
-This approach works from an API standpoint, but it would show performance issues as we keep adding elements to the array. Because we must prevent duplicated keys, we need to iterate through the whole array every time we attempt to add a new pair if the key is not already present.
+This approach works from an API standpoint, but it would show performance issues as we keep adding elements to the array. Because we must prevent duplicated keys, we need to iterate through the whole array every time we attempt to add a new pair if the key is not already present. This `add` implementation is an O(n) operation, where n is the number of pairs in the dictionary. The amount of time required to add an element is proportional to the size of the collection.
 
-A lookup might not always require a complete scan of the array, if we're lucky and find the key before the end, but it might, in the worst case scenario.
+A lookup might not always require a complete scan of the array, if we're lucky and find the key before the end, but it might, in the worst case scenario. The `lookup` operation is therefore also an O(n) operation.
 
-For Redis, which should be able to handle hundreds of thousand of keys, even millions, these performance issues are not acceptable.
+For Redis, which should be able to handle hundreds of thousand of keys, even millions, and potentially billions, these performance issues are not acceptable.
 
-One common implementation that addresses these performance issues is a hash table. Another possible implementation is a tree map, which uses a tree structure to store elements. The Java [`TreeMap`][java-doc-tree-map] uses a Red-Black tree. One benefits of a tree map compared to a hash map is that it stores elements in order, whereas a hash map does not.
+One common implementation that addresses these performance issues is a hash table. Another possible implementation is a tree map, which uses a tree structure to store elements. For instance, the Java [`TreeMap` class][java-doc-tree-map] uses a Red-Black tree to maintain the underlying tree balanced. One of the benefits of a tree map compared to a hash table is that it stores elements in order, whereas a hash table does not.
 
 In the next section we will learn how hash tables implement these operations in a more time efficient manner.
 
-Before moving on and abandoning this implementation, it's really important to note that while this implementation would not perform well with large collections, it might actually be one of the most efficient options for very small collections, such as with one or two pairs, thanks to its simplicity. If the array is small, finding an element requires very few steps and no memory overhead.
+Before moving on and abandoning this implementation, it's really important to note that while this implementation would not perform well with large collections, it might actually be one of the most efficient options for very small collections, such as with one or two pairs, thanks to its simplicity. If the array is small, finding an element requires very few steps and little memory overhead.
 
-As a matter of fact, the [Scala standard library][scala-map] does this for maps with up to four pairs, it has special case classes meant to handle these fixed sized maps, allowing them to be really fast as there's no need for hashing or anything else.
+As a matter of fact, the [Scala standard library][scala-map-optimization] does something similar for dictionaries with up to four pairs, it has special case classes meant to handle these fixed sized dictionaries, allowing them to be really fast as there's no need for hashing or anything else.
 
 ## Hash Tables
 
-Hash tables are available in many programming languages as part of their standard libraries. Python has `dict`, Java has `HashMap`, Scala has `Map`, Elixir has `Map`, Rust has `HashMap`, Ruby's `Hash` class is a hash table implementation too. You get it, they're almost everywhere.
+Hash tables are available in many programming languages as part of their standard libraries. Python has [`dict`][python-dict], Java has [`HashMap`][java-hashmap], Scala has [`Map`][scala-map], Elixir has [`Map`][elixir-map], Rust has [`HashMap`][rust-hashmap], Ruby's `Hash` class is a hash table implementation too. You get it, they're almost everywhere.
 
 Hash tables can be implemented in different ways, [the wikipedia article][wikipedia-hash-table] shows a few different examples. The one we'll explore in this chapter uses a collision resolution called separate chaining. But why do we need collision resolution? To answer this we first need to look at the central element of a hash table, its hash function.
 
@@ -100,7 +104,7 @@ function create_hash_table()
     table = allocate_array_of_arbitrary_initial_size()
     return table
 
-function add_key_value_pair(table, key, value)
+function add_or_update_key_value_pair(table, key, value)
     hash = hash_function(key)
     index = hash % table.size
     node = table[index]
@@ -133,64 +137,66 @@ function lookup_key(table, key)
 ```
 _listing 6.2: Pseudo-code hash table_
 
-The previous pseudo code section shows five functions, the first one is `new_node`. This function acts as the entry point of a linked list. A node contains a key, a value, and a next node value. If the next node value is null, the element is the last one in the list.
+The `new_node` function acts as the entry point of a linked list. A node contains a key, a value, and a next node value. If the next node value is null, the element is the last one in the list.
 
 Prepending — a fancy word for "adding at the beginning" — an element to such list is done by first creating a single node list and then a second one, with the `next_node` value set to the first one:
 
 ```
-first_node = new_node(k1, v1, null)
-two_node_list = new_node(k2, v2, first_node)
+node1 = new_node(key1, value1, null)
+node2 = new_node(key2, value2, node1)
 ```
 
-In this example `first_node` is a list with a single node, and `two_node_list` is a list with two nodes. The first node is the one with the key `k2` and the value `v2`, its `next_node` value is equal to `first_node`, which has the key `k1` and value `v1`, it does not have a `next_node` value and is the last element of the list.
+In this example `node1` is a list with a single node, and `node2` is a list with two nodes. The first node is the one with the key `key2` and the value `value2`, its `next_node` value is equal to `node1`, which has the key `key1` and value `value1`, it does not have a `next_node` value and is the last element of the list.
 
-`update_node` works with an existing node and changes its value. It is a useful function when we find an existing pair with a matching key in `add_key_value_pair`. We explore this other function in more details below.
+`update_node` works with an existing node and changes its value. It is a useful function when we find an existing pair with a matching key in `add_or_updatekey_value_pair`. We explore this other function in more details below.
 
-`create_hash_table` does only one thing, it allocates an array of arbitrary size. We purposefully do not define this function here. The size is not really important, as long as it creates a non empty array. The implementation of the allocation is also not really relevant to this example. Most operating systems provide such features, it's therefore fair to assume that it would use the allocation operations provided by the operating system.
+`create_hash_table` does only one thing, it allocates an array of arbitrary size. We purposefully do not define this function here. The size is not really important, as long as it creates a non empty array. The implementation of the allocation is also not really relevant to this example. Most operating systems provide such features, it's therefore fair to assume that it would use the allocation operations provided by the operating system. [`malloc`][c-malloc] is a function in the C standard library that does provide the ability to manually allocate memory.
 
-`add_key_value_pair` does more work and let's walk through it, one line at a time. It takes three parameters, the table we want to insert the pair into, the key and the value.
+`add_or_update_key_value_pair` does more work and let's walk through it, one line at a time. It takes three parameters, the table we want to insert the pair into, the key and the value.
 We first call `hash_function` with `key`. We'll dive deeper into what an implementation of `hash_function` looks like later, but for now, let's assume it returns an integer. Because the hash function is unaware of the size of the array, the returned value might be larger than the size of the array.
 
-We use the modulo operation to convert the hash value returned by `hash_function` into a number between 0 and `table.size - 1`. We can now use the result of the modulo operation as an index. That's why we have the `create_hash_table` function, to make sure that table is initialized with empty slots. These slots are often called buckets in hash table lingo.
+We use the modulo operation to convert the hash value returned by `hash_function` into a number between `0` and `table.size - 1`. We can now use the result of the modulo operation as an index. That's why we have the `create_hash_table` function, to make sure that table is initialized with empty slots. These slots are often called buckets in hash table lingo.
 
-There are two distinct cases to consider if there is already an item at the location obtained through the hash function. One of the list nodes in the bucket might have the same key, in this case we want to override its value with the new value.
+If the bucket is empty, then we create a new node, add it to the bucket and we're done. If the bucket is not empty, then things are more complicated.
 
-The other one is that the nodes already present might all have a different key, in which case we want to keep all the existing nodes and the new one. **This is called a collision**.
+There are two distinct cases to consider if there is already an item at the location obtained through the hash function. One of the nodes in the bucket might have the same key, in this case we want to override its value with the new value. This the case where we want to update an element in the array instead of adding it.
+
+The other one is that the nodes already present might all have a different key, in which case we want to keep all the existing nodes and add the new one. This the case where we want to add a new pair, and **is called a collision**.
 
 Let's illustrate with an example. Let's set the initial size of the array to 4, all the buckets are empty:
 
-```
+``` ruby
 table = [nil, nil, nil, nil]
 ```
 
 Let's define a hash function, that returns the length of the input string:
 
-```
+``` ruby
 function hash_function(string)
     return string.length
 ```
 
-If we first call `add_key_value_pair` with the key `"a"` and the value `"b"`, `hash_function` will return 1, the length of the string `"a"`. `1 % 4` returns 1, so we add the pair at index 1:
+If we first call `add_or_update_key_value_pair` with the key `"a"` and the value `"b"`, `hash_function` will return `1`, the length of the string `"a"`. `1 % 4` returns `1,` so we add the pair at index `1`:
 
-```
+``` ruby
 table = [nil, Node("a", "b", nil), nil, nil]
 ```
 
-Let's call `add_key_value_pair` with the pair `"cd"`/`"e"`, the length of `"cd"` is 2, `2 % 4` is 2, we insert the pair at index 2:
+Let's call `add_or_update_key_value_pair` with the pair `"cd"`/`"e"`, the length of `"cd"` is `2`, `2 % 4` is `2`, we insert the pair at index `2`:
 
-```
+``` ruby
 table = [nil, Node("a", "b", nil), Node("cd", "e", nil), nil]
 ```
 
-Let's now call `add_key_value_pair` with `"fg"`/`"h"`. The length of `"fg`" is 2, but there's already a pair at index 2. Because we want to keep all pairs we need a solution to resolve this collision. There are different strategies available to us here, and the one we're going to use is called "separate chaining".
+Let's now call `add_or_update_key_value_pair` with `"fg"`/`"h"`. The length of `"fg`" is `2`, but there's already a pair at index `2`. Because we want to keep all pairs we need a solution to resolve this collision. There are different strategies available to us here, and the one we're going to use is called "separate chaining".
 
-The essence of this strategy is that each bucket contains a linked list of values. So in the previous example, we insert the new element at the beginning of the list at index 2. Note that prepending an element to a linked list is an O(1) operation, it takes the same amount of time regardless of the size of the list. This is the list once the operation is completed:
+The essence of this strategy is that each bucket contains a linked list of values. So in the previous example, we insert the new element at the beginning of the list at index `2`. Note that prepending an element to a linked list is an O(1) operation, it takes the same amount of time regardless of the size of the list. This is the list once the operation is completed:
 
-```
+``` ruby
 table = [nil, Node("a", "b", nil), Node("fg", "h", "Node("cd", "e", nil)), nil]
 ```
 
-`lookup_key` is very similar to `add_key_value_pair`. We use the same process to find which bucket the key should be in. If the bucket is empty, we return `null`, the key is not present in the dictionary. On the other hand, if the bucket is not empty, we need to look through the list until we find the node with the key argument.
+`lookup_key` is very similar to `add_or_update_key_value_pair`. We use the same process to find which bucket the key should be in. If the bucket is empty, we return `null`, the key is not present in the dictionary. On the other hand, if the bucket is not empty, we need to look through the list until we find the node with the key argument.
 
 If we don't find any, the key is not present in the dictionary.
 
@@ -198,11 +204,15 @@ If we don't find any, the key is not present in the dictionary.
 
 The `hash_function` we used in the previous works well as an example because of its simplicity but it would not be practical in the real world. To keep hash tables efficient, we want to reduce the number of collisions as much as possible. This is because iterating through the linked list is inefficient, if there are a lot of collisions, it could take a long time to loop through all the items in the bucket.
 
-This is where the [uniformity property][wikipedia-hash-function-uniformity] of a hash function is really important. Uniformity helps reduce the likelihood of collision. In the previous example, if a hypothetical hash function had returned the values 1, 2 & 3, respectively, instead of 1, 2 & 2, there wouldn't have been any conflicts.
+This is where the [uniformity property][wikipedia-hash-function-uniformity] of a hash function is really important. Uniformity helps reduce the likelihood of collision. In the previous example, if a hypothetical hash function had returned the values `1`, `2` & `3`, respectively, instead of `1`, `2` & `2`, there wouldn't have been any conflicts.
 
 Collisions are also related to the size of the underlying array. Regardless of the uniformity of the hash function, if the underlying array has a size n, storing n + 1 items cannot happen without at least one collision.
 
 One approach would be to start by allocating a very large amount of memory, but this can be wasteful, because there could be a lot of memory allocated, but unused. Many hash table implementation have mechanisms to adjust the size as needed, and it turns out that Redis does this too, as we'll see in the next section.
+
+A good hash function that provides uniformity means that both operations `add/update` & `lookup` have an O(1) time complexity, meaning that the number of steps is always the same regardless of the number of elements already present. We first hash the value, transform it to an index and use the matching bucket.
+
+On the other hand, a bad hash function without uniformity would make these operations O(n). In the absolute worst case scenario, all keys would land in the same bucket, and the number of operations required would depend on the number of elements already present in the linked list in the bucket.
 
 **Back to determinism**
 
@@ -210,7 +220,7 @@ Now that we know how the result of a hash function is used, that is, it determin
 
 Let's demonstrate why we need determinism by showing what would happen with a hash function that is not deterministic.
 
-In Ruby, each object is given an object id, in the following examples, the two variables `str1` & `str2` are different instances, each holding the same value, and are therefore considered equal:
+In Ruby, each object is given an object id, in the following examples, the two variables `str1` & `str2` are different instances, each holding the same value, and are therefore considered equal, but have different `object_id` values:
 
 ``` ruby
 str1 = "hello"
@@ -230,7 +240,7 @@ def hash_function(object)
 end
 ```
 
-Let's manually walk through a small example, let's start by creating a hash table of size 3 and add the pair `a-key/a-value` to it. Let's re-use the same `object_id` from the previous example, and assume that `a-key` would have returned 180. `180 % 3 = 0`, so we insert the new node at index 0:
+Let's manually walk through a small example, let's start by creating a hash table of size 3 and add the pair `a-key/a-value` to it. Let's re-use the same `object_id` from the previous example, and assume that `a-key` would have returned `180`. `180 % 3 = 0`, so we insert the new node at index `0`:
 
 ``` ruby
 table = [Node("a-key", "a-value", nil), nil, nil]
@@ -247,23 +257,24 @@ In order for a hash table implementation to be efficient, it needs a good hash f
 - Cyclic redundancy checks
 - Checksums
 - Universal hash function families
-- Non-cryptographic hash functions
-- Keyed cryptographic hash functions
-- Unkeyed cryptographic hash functions
+- Non-cryptographic
+- Keyed cryptographic
+- Unkeyed cryptographic
 
 Some of the functions in the "Unkeyed cryptographic hash functions" category are pretty common. MD5 used to be very common to verify the integrity of a file downloaded over the internet. You would download the file, compute the md5 of the file locally and compare it against the md5 published by the author of the file. It is common to see sha256 used instead nowadays. This is what the [Downloads page on ruby-lang.org][ruby-downloads] does!
 
 For a long time sha1 was the default algorithm used by git to hash commits and other objects. It now supports multiple algorithms such as sha256. This change was required after researchers proved that it was possible to forge two different inputs resulting in the same sha1 hash.
 
-Redis uses SipHash which is in the "Keyed cryptographic hash functions". We will look closer at the SipHash algorithm below.
+Redis uses SipHash which is in the "Keyed cryptographic hash functions" category. We will look closer at the SipHash algorithm below.
 
-It turns out that Ruby's objects all implement a `hash` function, which happens to use the Siphash algorithm, the same algorithm Redis uses!
+All Ruby objects implement a `hash` method, which happens to use the Siphash algorithm, the same algorithm Redis uses!
 
 ``` ruby
 str1 = "hello"
 str2 = "hello"
 # Note that the hash value is partially computed from a random value and will thefore be different
 # on your machine
+# It will also be different if you restart irb
 str1.hash # => 2242191710387986831
 str2.hash # => 2242191710387986831
 ```
@@ -272,7 +283,7 @@ Now that we know what a hash function is, how it used to implement a hash table,
 
 ## How does Redis do it?
 
-Redis uses 3 main data structures to implement a dictionary, `dict`, `dictht` & `dictEntry`, the following diagram, from [wjin.org][wjin-blog] shows how they each relate to each other:
+Redis uses 3 main data structures to implement a dictionary, `dict`, `dictht` & `dictEntry`, the following diagram, from [wjin.org][wjin-blog], shows how they each relate to each other:
 
 ![Diagram of Redis' dict data structure](/redis_dict.png)
 
@@ -313,10 +324,12 @@ typedef struct dict {
 ```
 _listing 6.4: The C struct for dict_
 
+Once again, in order to keep things as simple as possible, we will ignore some fields, specifically, `privdata` & `iterators`.
+
 The `dictType` struct is used to configure the behavior of a `dict` instance, such as using a different hash function for instance. It is defined as:
 
 ``` c
-// https://github.com/antirez/redis/blob/6.0/src/dict.h#L58-L65
+// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L58-L65
 typedef struct dictType {
     uint64_t (*hashFunction)(const void *key);
     void *(*keyDup)(void *privdata, const void *key);
@@ -328,14 +341,14 @@ typedef struct dictType {
 ```
 _listing 6.5: The C struct for dictType_
 
-This syntax is used to defined pointers to function. That's about as far as we'll go with C in this chapter. We don't need to change these values so we will not implement these features in our implementation.
+The syntax used in this struct is different because the members are function pointers. That's about as far as we'll go with C in this chapter. Redis does this to allow a form of configuration of a `dict` instance. It has the ability to create two dictionaries with potentially two different hash function implementation for instance. We don't need this level of flexibility at the moment so we will not implement these features for now.
 
 The most interesting element of the `dict` struct for us is the `dictht` array. `ht` here stands for **H**ash **T**able. `ht[2]` means that the struct member is named `ht` and is an array of size two. Essentially, each `dict` instance has two hash tables, `ht[0]` & `ht[1]`.
 
 `dictht` is defined as follows:
 
 ``` c
-// https://github.com/antirez/redis/blob/6.0/src/dict.h#L67-L74
+// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L67-L74
 /* This is our hash table structure. Every dictionary has two of this as we
  * implement incremental rehashing, for the old to the new table. */
 typedef struct dictht {
@@ -350,7 +363,7 @@ _listing 6.6: The C struct for dictht_
 The comment tells us why a dict has two tables, for rehashing. To explain rehashing, we first need to explain the first member of `dictht`: `dictEntry **table`. The double star syntax, a pointer to pointer, is not that interesting to us at the moment. What we do need to do is look at the `dictEntry` struct:
 
 ``` c
-// https://github.com/antirez/redis/blob/6.0/src/dict.h#L47-L56
+// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L47-L56
 typedef struct dictEntry {
     void *key;
     union {
@@ -368,19 +381,22 @@ _listing 6.7: The C struct for dictEntry_
 
 `dictEntry **table` in `dict` defines an array of `dictEntry` items, with a dynamic size, determined at runtime. This is why `dictht` also includes a `size` member. `used` is a counter, that starts at `0` and that is incremented when items are added, and decremented when items are removed.
 
-`sizemask` is an integer value, which is initialized at `0` if size is also `0`, but is otherwise always set to `size - 1`.
+`sizemask` is an integer value, which is initialized at `0` if `size` is also `0`, but is otherwise always set to `size - 1`.
 
-To understand the need for the `sizemask` member, let's look back at our pseudo code implementation from above. We can see that a very common operation is to use `hash_value % array_size`. This operation converts a value, potentially larger than the array size, to one that is between 0 and size - 1, allowing us to use it as an index.
+To understand the need for the `sizemask` member, let's look back at our pseudo code implementation from above. We can see that a very common operation is to use `hash_value % array_size`. This operation converts a value, potentially larger than the array size, to one that is between `0` and `size - 1`, allowing us to use the result as an index for the underlying array.
 
-The modulo operation, `%`, is not that costly, but it does require a few steps, am integer division, followed by a multiplication and a subtraction:
+The modulo operation, `%`, is not that costly, but it does require a few steps, an integer division, followed by a multiplication and a subtraction: `c - (c/m*m)`. Let confirm with an example:
 
+``` ruby
+c = 469513
+m = 143317
+c % m # => 39562
+c - (c/m*m) # => 39562
 ```
-c - (c/m*m)
-```
 
-Given how crucial this operation is to the performance of a hash table, every operation relies on it, to find the location inside the backing array, it is valuable to attempt to optimize it.
+Given how crucial this operation is to the performance of a hash table, every operation relies on it to find the bucket index, it is valuable to attempt to optimize it.
 
-It turns out that if, and only if, the modulus (the second part of the modulo operation, b in a % b, the size of the array in the hash table) is a power of two, then the modulo can be computed in a single operation with the bitwise `AND`/`&` operator:
+It turns out that if, and only if, the modulus (the second part of the modulo operation, `b` in `a % b`, the size of the array in the hash table) is a power of two, then the modulo can be computed in a single operation with the bitwise `AND`/`&` operator:
 
 ```
 a & (b-1)
@@ -437,10 +453,10 @@ _listing 6.8: excerpt of dictFind_
 
 **Rehashing**
 
-Now that we know the data structures that Redis uses to implement its dict type, we need to look at the rehashing process. A new dictionary in Redis is always empty, the backing table is set to `NULL` and the `size`, `sizemask` and `used` members are all set to 0:
+Now that we looked at the data structures that Redis uses to implement its `dict` type, we need to look at the rehashing process. A new dictionary in Redis is always empty, the backing table, the `table` member, is set to `NULL` and the `size`, `sizemask` and `used` members are all set to 0:
 
 ``` c
-// https://github.com/antirez/redis/blob/6.0/src/dict.c#L102-L108
+// https://github.com/antirez/redis/blob/6.0.0/src/dict.c#L102-L108
 static void _dictReset(dictht *ht)
 {
     ht->table = NULL;
@@ -449,7 +465,7 @@ static void _dictReset(dictht *ht)
     ht->used = 0;
 }
 
-// https://github.com/antirez/redis/blob/6.0/src/dict.c#L121-L131
+// https://github.com/antirez/redis/blob/6.0.0/src/dict.c#L121-L131
 int _dictInit(dict *d, dictType *type,
         void *privDataPtr)
 {
@@ -464,90 +480,110 @@ int _dictInit(dict *d, dictType *type,
 ```
 _listing 6.9: C code for \_dictReset & \_dictInit_
 
-Whenever Redis adds a new key/value pair to a dictionary, it first checks if the dictionary should be expanded. The main reason causing a dict to expand is if the number of items in it, the `used` member, is greater than or equal to the size of the dict, the `size` member. This will always be true for an empty dictionary since both are initialized to 0. This will also true every time the number of items reaches the size of the dict. When the dict is of size 4, once 4 items are added, the next addition will trigger a resize.
+Whenever Redis adds a new key/value pair to a dictionary, it first checks if the dictionary should be expanded. The main reason causing a dict to expand is if the number of items in it, the `used` member, is greater than or equal to the size of the dict, the `size` member. This will always be true for an empty dictionary since both are initialized to 0. This will also be true every time the number of items reaches the size of the dict. When the dict is of size 4, once 4 items are added, the next addition will trigger a resize.
 
-As mentioned earlier, in order to take advantage of the "fast modulo for a power of two value through bitwise AND" property, Redis will always choose a power of two for the size. The smallest non empty size is 4, and it will grow through power of twos from there on. 8, 16, 32, 64 and so on. All the way up to `LONG_MAX + 1`, `9,223,372,036,854,775,808`. That's 9.2 billion billions! Yes it's a huge number!
+As mentioned earlier, in order to take advantage of the "fast modulo for a power of two value through bitwise AND" property, Redis will always choose a power of two for the size. The smallest non empty size is 4, and it will grow through power of twos from there on: 8, 16, 32, 64 and so on. All the way up to `LONG_MAX + 1`, `9,223,372,036,854,775,808`, also written as `9.223372036854776e+18` in the exponential notation. That's 9.2 billion billions, Yes it's a huge number!
 
-Back in [Chapter 4][chapter-4] we talked about Big ) notation and time complexity. The bottom line being that since Redis processes incoming commands sequentially, a slow operation would effectively back the queue. You can think of it as someone taking a long time to go through checkout at a grocery store. The longer they take, the more likely it is that the queue of customers waiting in will increase.
+{{% admonition info "Why LONG_MAX + 1" %}}
 
-Resizing a hash table is essentially an `O(n)` operation, that it is, the time it takes to do it is proportional to n, the number of elements in the hash table. In other words, the more elements in the table, the longer it'll take to resize it. And as we just saw, Redis hash tables can get big, really big! Forcing all the clients in the queue to wait while we resize the table is far from desirable.
+Redis uses `LONG_MAX + 1` as the maximum value for a dict size. `LONG_MAX` is a constant defined in the C header file `limits.h` and is set to 9,223,372,036,854,775,807. We can see that it's not a power of two by looking at the right most digit, `7`, it's not even, so we already know that it's not a power of two. All power of two are even numbers since by definition, we obtain them by multiplying `2`s.
+
+This big number is a 64-bit integer, where all bits are `1`s, except the first one:
+
+```
+0111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111
+```
+
+The first bit is a 0 because LONG_MAX is a signed integer, that is it can be negative of positive. Signed integers use the first bit to determine the sign, `0` for positive, `1` for negative. The other bound is `LONG_MIN`, set to `-9,223,372,036,854,775,808`, which is the same above, but where the first bit is a 1:
+```
+1000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+```
+
+This representation of signed numbers is called [Two's complement][twos-complement], there are other representations but two's complement is a very common one.
+
+The only larger number that can fit in a 64-bit integer, is the unsigned max value, where all bits, even the first one, are used to encode the integer value, it's called `ULONG_MAX`, `U` stands for **u**signed here, and is set to: `18,446,744,073,709,551,615`, `2^64 - 1` . As we did before, we can see that it's not a power of two, `5`, the last digit, is not even. This is its binary representation, 64 `1`s:
+
+```
+1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111
+```
+
+It means that if we want to use power of two numbers, then the largest one we can get to is `2^63`. The max value we can encode in a 64 bit integer is `2^64 - 1`, one short, so we have to stop one power of two below, hence setting the upper bound to `LONG_MAX + 1`, aka, `2^63`.
+
+{{% /admonition %}}
+
+Back in [Chapter 4][chapter-4] we talked about Big O notation and time complexity. The bottom line being that since Redis processes incoming commands sequentially, a slow operation would effectively back the queue. You can think of it as someone taking a long time to go through checkout at a grocery store. The longer they take, the more likely it is that the queue of customers waiting in line increases.
+
+Resizing a hash table is essentially an `O(n)` operation, the time it takes to do it is proportional to n, the number of elements in the hash table. In other words, the more elements in the table, the longer it'll take to resize it. And as we just saw, Redis hash tables can get big, really big! Forcing all the clients in the queue to wait while we resize the table is far from desirable.
 
 Enter rehashing!
 
-Rehashing is the process Redis uses to incrementally, in small steps, resize the table, while still allowing other operations to be processed, and this is why it uses two hash tables per dictionary. Let's look at how rehashing through an example.
+Rehashing is the process Redis uses to incrementally, in small steps, resize the table, while still allowing other operations to be processed, and this is why it uses two hash tables per dictionary. Let's look at how rehashing works through an example.
 
 Note that resizing the array is technically not necessary to store the items given that each entry in the array, the buckets, are linked lists. This means that even an array of size 4 could store millions and billions of key/value pairs. The problem is that the performance would suffer drastically, iterating through that many items in a linked list would take a very long time. With millions of items, it could easily take multiple seconds.
 
 - The Redis server starts, the main dict is initialized with two hash tables, both empty
 - The server receives a SET command, it needs to expand the dictionary.
 - It finds the next power of two that will be enough to fit all the elements, it needs to store one element, so it uses the minimum value 4.
-- It allocates the main array, ht[0], with a size of 4, and adds the first key/value pair
-- The second, third & fourth values are added without any issues. used is now set to 4
+- It allocates the main array, `ht[0]`, with a size of 4, and adds the first key/value pair
+- The second, third & fourth values are added without any issues. `used` is now set to 4
 - A fifth SET command is received, Redis decides to resize the dict.
 - The resize process allocates a new table, big enough to store all the items, for which the size is a power of two. It selects the next power of two, 8.
-- The new table is assigned to the secondary table, the rehashing one, ht[1]
+- The new table is assigned to the secondary table, the rehashing one, `ht[1]`
 - The dict is now a rehashing state. In this state, all new keys are added to the rehashing table.
 - The dict has now 2 tables, where 4 keys are in the first table and 1 is in the second one.
 - While in this state, many operations, such as key lookups will look at both tables. For instance a GET command will first look at the first table, and if it doesn't find the item, will look at the rehashing table, and only if the items can't be find in either table, will return NULL.
-- While in rehashing state, many commands, such as key lookups or key additions, will perform a single step of rehashing. The server_cron time event we looked in Chapter 3 also attempts to rehash dictionaries that needs to.
+- While in rehashing state, many commands, such as key lookups or key additions, will perform a single step of rehashing. The `server_cron` time event we looked in Chapter 3 also attempts to rehash dictionaries that needs to.
 - The rehashing process starts at index 0, looks at the first table, and if it finds an item, moves it to the second table. It then moves to index 1, until it iterated through the entire table
 - Once it's done, it makes the rehashing table the primary, resets the rehashing table to an empty table and exits the rehashing state
 
 This process allows Redis to resize dictionaries in small steps, while not preventing clients to send commands in the meantime.
 
-Rehashing is also used to reduce the size of a dictionary. If the number of keys, the `used` member goes below 1/10th of the `size` value, that is, only 10% of the dictionary is used, Redis will try to find a better size to fit the keys. That is, it will find the smallest power of two that is greater than or equal to `used`.
+Rehashing is also used to reduce the size of a dictionary. If the number of keys, the `used` member, goes below 1/10th of the `size` value, that is, only 10% of the dictionary is used, Redis will try to find a better size to fit the keys. That is, it will find the smallest power of two that is greater than or equal to `used`.
 This is also performed in `server_cron`, as a time event and prevents Redis from unnecessarily using memory.
 
-If you want to dig deeper in the Redis implementation, here are few interesting functions you can start looking at:
+If you want to dig deeper in the Redis implementation, here are few interesting functions you can start with:
 
-``` c
-// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L151
-dict *dictCreate(dictType *type, void *privDataPtr);
-// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L152
-int dictExpand(dict *d, unsigned long size);
-// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L153
-int dictAdd(dict *d, void *key, void *val);
-// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L161
-dictEntry * dictFind(dict *d, const void *key);
-// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L163
-int dictResize(dict *d);
-// ...
-int dictRehash(dict *d, int n);
-int dictRehashMilliseconds(dict *d, int ms);
-```
+- [`dictCreate`](https://github.com/redis/redis/blob/6.0.0/src/dict.c#L111)
+- [`dictExpand`](https://github.com/redis/redis/blob/6.0.0/src/dict.c#L147)
+- [`dictAdd`](https://github.com/redis/redis/blob/6.0.0/src/dict.c#L265)
+- [`dictFind`](https://github.com/redis/redis/blob/6.0.0/src/dict.c#L476)
+- [`dictResie`](https://github.com/redis/redis/blob/6.0.0/src/dict.c#L135)
+- [`dictRehash`](https://github.com/redis/redis/blob/6.0.0/src/dict.c#L188)
+- [`dictRehashMillisecond`](https://github.com/redis/redis/blob/6.0.0/src/dict.c#L241)
+
 
 ### The SipHash hash function
 
-The siphash algorithm is described in the [SipHash: a fast short-input PRF paper][siphash-paper].
+The last thing we need to look at before building our own hash table is the hash function. Redis has been using the SipHash algorithm since 5.0. Before that it had been using the MurmurHash2 algorithm as of 2.5. And before that, it used a simple version from Dan Bernstein called [djb2][hash-djb2].
 
-The last thing we need to look at before building our own hash table is the hash function. Redis has been using the SipHash algorithm since 5.0. Before that it has been using the MurmurHash2 algorithm as of 2.5. And before that, it used a simple version from Dan Bernstein called [djb2][hash-djb2].
+The SipHash algorithm is described in this paper: [SipHash: a fast short-input PRF paper][siphash-paper].
 
 One of the benefits of SipHash is that it offers strong protection against attacks such as [hash flooding][hash-flooding].
 
-The implementation of the Siphash algorithm is quite complicated. The one used by Redis is in the [`siphash.c` file][redis-source-siphash] and a Ruby implementation is provided in [Appendix B][appendix-b]. What is important to note is that Siphash requires a key, usually coming from random bytes, to compute a hash value.
+The implementation of the SipHash algorithm is quite complicated. The one used by Redis is in the [`siphash.c` file][redis-source-siphash] and a Ruby implementation is provided in [Appendix B][appendix-b]. What is important to note is that Siphash requires a key, usually coming from random bytes, to compute a hash value.
 
 This means that unlike md5 or sha1, which always return the same value for the same input, siphash will return the same value, if, and only if, the key is the same.
 
-This is a simplified explanation of how the hash flooding protection works. If redis were to use md5 as its hashing function, I would know what the hash value used to compute the index would be:
+This is essentially a simplified explanation of how the hash flooding protection works. If Redis were to use md5 as its hashing function, I could try to guess what the hash value used to compute the index would be. Let's see that with an example:
 
 The md5 hash for the string `a` is the string `0cc175b9c0f1b6a831c399e269772661`:
 
-```
+``` ruby
 Digest::MD5.hexdigest("a") # => 0cc175b9c0f1b6a831c399e269772661
 ```
 
-The result is a 32 character string representing a 128-bit (16 bytes) result. Because most CPUs use 64-bit integers as their largest types, the result we just saw is actually the hex representation of two 64 bit integers. Let's illustrate this with the `pack` and `unpack` method:
-
-Source: https://anthonylewis.com/2011/02/09/to-hex-and-back-with-ruby/
+The result is a 32 character string representing a 128-bit (16 bytes) result. Because most CPUs use 64-bit integers as their largest types, the result we just saw is actually the hex representation of two 64 bit integers. Let's illustrate this with the `pack` and `unpack` method.
 
 The string is a hex string, so we need to look at each pair of characters. We call `hex` on each pair, which returns the integer value. For instance `'00'.hex` return `0`, `'ff'.hex` returns `255`, the maximum value of an 8-bit integer. We then call `.pack('c16')` which returns a string representing all the bits concatenated together.
 
-Finally `.unpack('QQ')` looks at the string and tries to convert to two 64 bit integers:
+Finally `.unpack('QQ')` looks at the string of bytes and tries to convert to two 64 bit integers:
 
+``` ruby
+bytes = "0cc175b9c0f1b6a831c399e269772661".scan(/../).map(&:hex).pack('c16') # => "\f\xC1u\xB9\xC0\xF1\xB6\xA81\xC3\x99\xE2iw&a"
+bytes.unpack("QQ") # => [12157170054180749580, 7000413967451013937]
 ```
-"0cc175b9c0f1b6a831c399e269772661".scan(/../).map(&:hex).pack('c16').unpack("QQ")
-# => [12157170054180749580, 7000413967451013937]
-```
+
+The previous code was adapted from [this blog post](https://anthonylewis.com/2011/02/09/to-hex-and-back-with-ruby/)
 
 A simpler example might help illustrate this:
 
@@ -582,7 +618,7 @@ We can also look at the actual 64 bits with `unpack('B64')`
 => ["0011000111000011100110011110001001101001011101110010011001100001"]
 ```
 
-Back to our hypothetical use of md5 as a hash function in Redis. Given that we would only use a single integer to apply the modulo to, we could pick either way, so let's pick the second one, just because.
+Back to our hypothetical use of md5 as a hash function in Redis. Given that we would only use a single integer to apply the modulo to, we could pick either the first one or last one, let's arbitrarily pick the second one, just because.
 
 If I sent the command `SET a-key a-value`, the hash value of `a-key` is the 64 bit integer `7000413967451013937`. This knowledge can be used to forge special requests and maximize the chances of collisions, potentially causing performance issues to the hash table.
 
@@ -594,10 +630,10 @@ Siphash was added to Redis in [this commit](https://github.com/redis/redis/commi
 
 ### `Dict`, `HashTable` & `DictEntry`
 
-We previously looked at the main data structured used in the Redis code base to implement a hash table. We will reimplement a simplified version of those, let's start with the two small ones, `DictEntry` & `HashTable`:
+We previously looked at the main data structures used in the Redis code base to implement a hash table. We will reimplement a simplified version of those, let's start with the two small ones, `DictEntry` & `HashTable`:
 
 ``` ruby
-module Redis
+module BYORedis
   class DictEntry
 
     attr_accessor :next, :value
@@ -662,7 +698,7 @@ require_relative './siphash'
 require_relative './dict_entry'
 require_relative './hash_table'
 
-module Redis
+module BYORedis
   class Dict
 
     INITIAL_SIZE = 4
@@ -717,7 +753,7 @@ end
 ```
 _listing 6.13: The add method in the Dict class_
 
-The method is very similar to the pseudo code we looked at earlier in `add_key_value_pair`. We first obtain the index for the key, aka the location of the bucket the key should go into. We then perform a rehash step if we're in rehashing state.
+The method is very similar to the pseudo code we looked at earlier in `add_or_update_key_value_pair`. We first obtain the index for the key, aka the location of the bucket the key should go into. We then perform a rehash step if we're in rehashing state.
 
 We select which table the key will end up in depending on whether or not we are in rehashing state. If we are, the key will be added to the rehashing table, otherwise it is added to the main table.
 
@@ -768,7 +804,7 @@ The second line is necessary so that the head of list in the bucket points at th
 
 The last line, `hash_table.used += 1`, increments the counter of how many items are in the dictionary.
 
-Finally, we use the ruby `alias` keyword to create an alias for `add` to `[]=`. This allows us to use a `Dict` instance similarly to how we use a Ruby `Hash`:
+Finally, we use the Ruby `alias` keyword to create an alias for `add` to `[]=`. This allows us to use a `Dict` instance similarly to how we use a Ruby `Hash`:
 
 ``` ruby
 dict = Dict.new
@@ -1212,7 +1248,7 @@ end
 ```
 _listing 6.22: Replacing usages of Hash with Dict in the Server class_
 
-...
+The `SetCommand` class was using a `Hash` to store the configuration values of the possible options. We replace it similarly to what we did for the `COMMANDS` constant in `server.rb`:
 
 ``` ruby
 # set_command.rb
@@ -1256,10 +1292,10 @@ _listing 6.23: Replacing usages of Hash with Dict in the SetCommand class_
 
 ### Adding the `DEL` command
 
-As mentioned earlier in this chapter, the only option we currently have for keys to be deleted is to set them with a TTL. It will be more convenient to manually test the behavior of our new `Dict` class with a more explicit option. The `DEL` command is a very useful command, it accepts one or more keys as its arguments and attempts to delete them. It returns an integer representing the number of keys that were deleted:
+As mentioned earlier in this chapter, the only option we currently have for keys to be deleted is to set them with a TTL with the `EX` & `PX` options. It will be more convenient to manually test the behavior of our new `Dict` class with a more explicit option. The [`DEL`][redis-doc-del] command is a very useful command, it accepts one or more keys as its arguments and attempts to delete them. It returns an integer representing the number of keys that were deleted:
 
 ``` ruby
-module Redis
+module BYORedis
   class DelCommand
 
     def initialize(data_store, expires, args)
@@ -1277,6 +1313,7 @@ module Redis
         keys.each do |key|
           entry = @data_store.delete(key)
           if entry != nil
+            # If there was a key, then we need to delete its TTL if it had one:
             @expires.delete(key)
             deleted_count += 1
           end
@@ -1295,7 +1332,7 @@ module Redis
         1, # position of first key in argument list
         -1, # position of last key in argument list
         1, # step count for locating repeating keys
-        # acl categories: https://github.com/antirez/redis/blob/6.0/src/server.c#L161-L166
+        # acl categories: https://github.com/antirez/redis/blob/6.0.0/src/server.c#L161-L166
         [ '@keyspace', '@write', '@slow' ].map { |s| RESPSimpleString.new(s) },
       ]
     end
@@ -1336,6 +1373,22 @@ def delete(key)
 end
 ```
 _listing 6.25: The delete method in the Dict class_
+
+The logic in `delete` is similar to the `add` method. We start with a shortcut we've already seen, if the table is empty, there's no need to go any further, we can stop right there.
+
+We perform a rehashing step if needed, to keep the rehashing process moving and then we get the hash value for they key. The key we're attempting to delete might be in the main table or the rehashing table, so we use our helper method `iterate_through_hash_tables_unless_rehashing` to help with this.
+
+For each hash table we look at, we obtain the index and inspect the bucket at that location. If the bucket is empty, then there's nothing else to do, the key is not present in this table. If the bucket is not empty, we need to iterate through all the entries and compare the keys of these entries with the method argument. If there's a match we found the entry we need to delete, this is what the `while` loop is doing.
+
+If there is a match, the `if entry.key == key` condition, we need to handle two cases, whether or not the entry we want to delete is the first entry in the bucket. We use the `previous_entry` variable to keep track of the previous entry as we iterate through the entry list in the bucket. Once we find a match, this allows us to know if the entry we're trying to delete was the first one or not, if `previous_entry` is nil, then it is the first one.
+
+In this case the deleting process is to make the head of the bucket, `hash_table.table[index]`, point at the next element in the list. If `entry` was the only element, its `next` value would be `nil`, and the bucket would now be empty. If `entry` was the head of list with more than one element, then the bucket now starts with what was the second element in the list, the entry which `next` is to in `entry`.
+
+If `previous_entry` is not `nil`, then `entry` is not at the head of the list and the deletion process requires us to change `previous_entry.next` to now skip over `entry` since we want to remove it from the list, and point to the entry in `entry.next`. This entry might be nil or not, and it does not matter to us. If it was `nil`, then it means that `entry` was the last element in the list, and by changing `previous_entry.next` to `nil`, `previous_entry` is now the last entry. If it wasn't `nil`, then `previous_entry` now points to the element `entry` is pointing to, and no entries point at `entry` anymore, it's not floating on its own and is not part of the list anymore.
+
+In a language with manual memory management, such as C, we would also need to explicitly free the memory, but we're in Ruby, so we'll let the garbage collector do its job.
+
+Whether or not the entry was the first one in the bucket, it's now deleted, we decrement the `used` counter and return.
 
 ## Conclusion
 
@@ -1402,7 +1455,7 @@ class BYOArray < BasicObject
   end
 end
 ```
-_listing 6.26: A ruby implementation of an Array structure_
+_listing 6.26: A Ruby implementation of an Array structure_
 
 ``` ruby
 ary = BYOArray.new(2)
@@ -1544,5 +1597,13 @@ _listing 6.27: A Ruby implementation of the shiphash algorithm_
 [siphash-paper]:https://131002.net/siphash/siphash.pdf
 [chapter-7]:/
 [siphash-gem]:https://github.com/emboss/siphash-ruby
-[scala-map]:https://github.com/scala/scala/blob/2.13.x/src/library/scala/collection/immutable/Map.scala#L241
+[scala-map-optimization]:https://github.com/scala/scala/blob/2.13.x/src/library/scala/collection/immutable/Map.scala#L241
 [wjin-blog]:http://blog.wjin.org/posts/redis-internal-data-structure-dictionary.html
+[python-dict]:https://docs.python.org/3/tutorial/datastructures.html#dictionaries
+[java-hashmap]:https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/util/HashMap.html
+[rust-hashmap]:https://doc.rust-lang.org/beta/std/collections/struct.HashMap.html
+[elixir-map]:https://hexdocs.pm/elixir/Map.html
+[scala-map]:https://docs.scala-lang.org/overviews/collections-2.13/maps.html
+[c-malloc]:https://en.wikipedia.org/wiki/C_dynamic_memory_allocation
+[twos-complement]:https://en.wikipedia.org/wiki/Two%27s_complement
+[redis-doc-del]:https://redis.io/commands/del
