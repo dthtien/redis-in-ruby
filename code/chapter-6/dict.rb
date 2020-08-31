@@ -239,7 +239,7 @@ module BYORedis
       # That being said, let's still copy what Redis does, since it makes sense to have an
       # explicit limit about how big our Dicts can get
       i = INITIAL_SIZE
-      return MAX_SIZE if i > MAX_SIZE
+      return MAX_SIZE if size >= MAX_SIZE
 
       loop do
         return i if i >= size

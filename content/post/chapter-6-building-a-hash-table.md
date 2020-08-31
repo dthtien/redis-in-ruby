@@ -283,7 +283,7 @@ Now that we know what a hash function is, how it used to implement a hash table,
 
 ## How does Redis do it?
 
-Redis uses 3 main data structures to implement a dictionary, `dict`, `dictht` & `dictEntry`, the following diagram, from [wjin.org][wjin-blog], shows how they each relate to each other:
+Redis uses three data structures to implement a dictionary, `dict`, `dictht` & `dictEntry`, the following diagram, from [wjin.org][wjin-blog], shows how they each relate to each other:
 
 ![Diagram of Redis' dict data structure](/redis_dict.png)
 
@@ -291,10 +291,9 @@ It's important to note that dictionaries are used in multiple places in the Redi
 
 If you're not used to C, don't worry too much about it for now, we're not going to look too closely at pointers and other C specific features.
 
-Our implementation supports a single database, but Redis can handle multiple databases. A database in Redis represents a set of key/value pairs. A database is defined as the following C struct:
+Our implementation supports a single database, but Redis can handle multiple databases. A database in Redis represents a set of key/value pairs it is defined as the following C struct:
 
 ``` c
-// https://github.com/antirez/redis/blob/6.0.0/src/server.h#L644-L654
 typedef struct redisDb {
     dict *dict;                 /* The keyspace for this DB */
     dict *expires;              /* Timeout of keys with a timeout set */
@@ -307,7 +306,7 @@ typedef struct redisDb {
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
 } redisDb;
 ```
-_listing 6.3: The C struct for redisDB_
+_listing 6.3: The C struct for redisDB defined in [dict.c](https://github.com/antirez/redis/blob/6.0.0/src/server.h#L644-L654)_
 
 We will ignore all the fields but the first two for now. We can see that the two fields, `dict` & `expires` are both of the same type: `dict`.
 
@@ -329,7 +328,6 @@ Once again, in order to keep things as simple as possible, we will ignore some f
 The `dictType` struct is used to configure the behavior of a `dict` instance, such as using a different hash function for instance. It is defined as:
 
 ``` c
-// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L58-L65
 typedef struct dictType {
     uint64_t (*hashFunction)(const void *key);
     void *(*keyDup)(void *privdata, const void *key);
@@ -339,16 +337,15 @@ typedef struct dictType {
     void (*valDestructor)(void *privdata, void *obj);
 } dictType;
 ```
-_listing 6.5: The C struct for dictType_
+_listing 6.5: The C struct for dictType defined in [dict.c](https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L58-L65)_
 
-The syntax used in this struct is different because the members are function pointers. That's about as far as we'll go with C in this chapter. Redis does this to allow a form of configuration of a `dict` instance. It has the ability to create two dictionaries with potentially two different hash function implementation for instance. We don't need this level of flexibility at the moment so we will not implement these features for now.
+The syntax used in this struct is different because the members are function pointers. That's about as far as we'll go with C in this chapter. Redis does this to allow a form of configuration of a `dict` instance. It has the ability to create two dictionaries with potentially two different hash function implementation. We don't need this level of flexibility at the moment so we will not implement these features for now.
 
 The most interesting element of the `dict` struct for us is the `dictht` array. `ht` here stands for **H**ash **T**able. `ht[2]` means that the struct member is named `ht` and is an array of size two. Essentially, each `dict` instance has two hash tables, `ht[0]` & `ht[1]`.
 
 `dictht` is defined as follows:
 
 ``` c
-// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L67-L74
 /* This is our hash table structure. Every dictionary has two of this as we
  * implement incremental rehashing, for the old to the new table. */
 typedef struct dictht {
@@ -358,12 +355,11 @@ typedef struct dictht {
     unsigned long used;
 } dictht;
 ```
-_listing 6.6: The C struct for dictht_
+_listing 6.6: The C struct for dictht defined in [dict.c](https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L67-L74)_
 
-The comment tells us why a dict has two tables, for rehashing. To explain rehashing, we first need to explain the first member of `dictht`: `dictEntry **table`. The double star syntax, a pointer to pointer, is not that interesting to us at the moment. What we do need to do is look at the `dictEntry` struct:
+The comment tells us why a dict has two tables, for rehashing. To explain rehashing, we first need to explain the first member of `dictht`: `dictEntry **table`. The double star syntax, a pointer to pointer, is not that interesting to us at the moment, it is one way of defining an array of `dictEntry` with dynamic size, one that can be set at runtime. We then need to look at the `dictEntry` struct:
 
 ``` c
-// https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L47-L56
 typedef struct dictEntry {
     void *key;
     union {
@@ -375,11 +371,11 @@ typedef struct dictEntry {
     struct dictEntry *next;
 } dictEntry;
 ```
-_listing 6.7: The C struct for dictEntry_
+_listing 6.7: The C struct for dictEntry defined in [dict.c](https://github.com/antirez/redis/blob/6.0.0/src/dict.h#L47-L56)_
 
 `dictEntry` is a linked list, a common term for a structure like this one is "a node". It contains a key, `key`, a value, `v` and a link to the next element in the list, `next`.
 
-`dictEntry **table` in `dict` defines an array of `dictEntry` items, with a dynamic size, determined at runtime. This is why `dictht` also includes a `size` member. `used` is a counter, that starts at `0` and that is incremented when items are added, and decremented when items are removed.
+Because `dictEntry **table` is an array with a dynamic size, we also need the `size` member. `used` is a counter, that starts at `0` and that is incremented when items are added, and decremented when items are removed.
 
 `sizemask` is an integer value, which is initialized at `0` if `size` is also `0`, but is otherwise always set to `size - 1`.
 
@@ -482,11 +478,13 @@ _listing 6.9: C code for \_dictReset & \_dictInit_
 
 Whenever Redis adds a new key/value pair to a dictionary, it first checks if the dictionary should be expanded. The main reason causing a dict to expand is if the number of items in it, the `used` member, is greater than or equal to the size of the dict, the `size` member. This will always be true for an empty dictionary since both are initialized to 0. This will also be true every time the number of items reaches the size of the dict. When the dict is of size 4, once 4 items are added, the next addition will trigger a resize.
 
+This is necessary to limit the likelihood of collisions, because as we discussed, collisions slow down the hash table. If the array contains four buckets and the table needs to store five items, it will at best have one collision. If we resize the array to contain eight buckets, then it is possible to store the five items without any collisions.
+
 As mentioned earlier, in order to take advantage of the "fast modulo for a power of two value through bitwise AND" property, Redis will always choose a power of two for the size. The smallest non empty size is 4, and it will grow through power of twos from there on: 8, 16, 32, 64 and so on. All the way up to `LONG_MAX + 1`, `9,223,372,036,854,775,808`, also written as `9.223372036854776e+18` in the exponential notation. That's 9.2 billion billions, Yes it's a huge number!
 
 {{% admonition info "Why LONG_MAX + 1" %}}
 
-Redis uses `LONG_MAX + 1` as the maximum value for a dict size. `LONG_MAX` is a constant defined in the C header file `limits.h` and is set to 9,223,372,036,854,775,807. We can see that it's not a power of two by looking at the right most digit, `7`, it's not even, so we already know that it's not a power of two. All power of two are even numbers since by definition, we obtain them by multiplying `2`s.
+Redis uses `LONG_MAX + 1` as the maximum value for a dict size. `LONG_MAX` is a constant defined in the C header file `limits.h` and is set to `9,223,372,036,854,775,807`. We can see that it's not a power of two by looking at the right most digit, `7`, it's not even, so we already know that it's not a power of two. All power of two are even numbers since by definition, we obtain them by multiplying `2`s.
 
 This big number is a 64-bit integer, where all bits are `1`s, except the first one:
 
@@ -494,7 +492,7 @@ This big number is a 64-bit integer, where all bits are `1`s, except the first o
 0111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111
 ```
 
-The first bit is a 0 because LONG_MAX is a signed integer, that is it can be negative of positive. Signed integers use the first bit to determine the sign, `0` for positive, `1` for negative. The other bound is `LONG_MIN`, set to `-9,223,372,036,854,775,808`, which is the same above, but where the first bit is a 1:
+The first bit is a 0 because LONG_MAX is a signed integer, that is it can be negative of positive. Signed integers use the first bit to determine the sign, `0` for positive, `1` for negative. The other bound is `LONG_MIN`, set to `-9,223,372,036,854,775,808`, which has the following binary representation:
 ```
 1000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
 ```
@@ -532,7 +530,7 @@ Note that resizing the array is technically not necessary to store the items giv
 - The dict is now a rehashing state. In this state, all new keys are added to the rehashing table.
 - The dict has now 2 tables, where 4 keys are in the first table and 1 is in the second one.
 - While in this state, many operations, such as key lookups will look at both tables. For instance a GET command will first look at the first table, and if it doesn't find the item, will look at the rehashing table, and only if the items can't be find in either table, will return NULL.
-- While in rehashing state, many commands, such as key lookups or key additions, will perform a single step of rehashing. The `server_cron` time event we looked in Chapter 3 also attempts to rehash dictionaries that needs to.
+- While in rehashing state, many commands, such as key lookups or key additions, will perform a single step of rehashing. The `server_cron` time event we looked at in Chapter 3 also attempts to rehash dictionaries that needs to.
 - The rehashing process starts at index 0, looks at the first table, and if it finds an item, moves it to the second table. It then moves to index 1, until it iterated through the entire table
 - Once it's done, it makes the rehashing table the primary, resets the rehashing table to an empty table and exits the rehashing state
 
@@ -554,7 +552,7 @@ If you want to dig deeper in the Redis implementation, here are few interesting 
 
 ### The SipHash hash function
 
-The last thing we need to look at before building our own hash table is the hash function. Redis has been using the SipHash algorithm since 5.0. Before that it had been using the MurmurHash2 algorithm as of 2.5. And before that, it used a simple version from Dan Bernstein called [djb2][hash-djb2].
+The last thing we need to look at before building our own hash table is the hash function. Redis has been using the SipHash algorithm since version 5.0. Before that it had been using the MurmurHash2 algorithm as of version 2.5. And before that, it used a simple version from Dan Bernstein called [djb2][hash-djb2].
 
 The SipHash algorithm is described in this paper: [SipHash: a fast short-input PRF paper][siphash-paper].
 
@@ -574,9 +572,9 @@ Digest::MD5.hexdigest("a") # => 0cc175b9c0f1b6a831c399e269772661
 
 The result is a 32 character string representing a 128-bit (16 bytes) result. Because most CPUs use 64-bit integers as their largest types, the result we just saw is actually the hex representation of two 64 bit integers. Let's illustrate this with the `pack` and `unpack` method.
 
-The string is a hex string, so we need to look at each pair of characters. We call `hex` on each pair, which returns the integer value. For instance `'00'.hex` return `0`, `'ff'.hex` returns `255`, the maximum value of an 8-bit integer. We then call `.pack('c16')` which returns a string representing all the bits concatenated together.
+The string is a hex string, so we need to look at each pair of characters. We call `hex` on each pair, which returns the integer value. For instance `'00'.hex` returns `0`, `'ff'.hex` returns `255`, the maximum value of an 8-bit integer — a byte. We then call `.pack('c16')` which returns a string representing all the bits concatenated together. We use `'c16'` because the result of `.map(&:hex)` is an array of 16 bytes.
 
-Finally `.unpack('QQ')` looks at the string of bytes and tries to convert to two 64 bit integers:
+Finally `.unpack('QQ')` looks at the string of bytes and tries to convert to two 64 bit integers. We use `'QQ'`, which is identical to `'Q2'`, because a string of 16 bytes can be unpacked to two 64-bit integer. One 64-bit integer is composed of 8 bytes — a byte contains 8 bits, so 8 bytes contain 64 bits — so 16 bytes can be unpacked to two 64-bit integers.
 
 ``` ruby
 bytes = "0cc175b9c0f1b6a831c399e269772661".scan(/../).map(&:hex).pack('c16') # => "\f\xC1u\xB9\xC0\xF1\xB6\xA81\xC3\x99\xE2iw&a"
@@ -600,7 +598,7 @@ A simpler example might help illustrate this:
 
 We can play with `pack` and `unpack` a little bit more to confirm that these two 64-bit integers we got are the two elements of the md5 result:
 
-```
+``` ruby
 [12157170054180749580].pack("Q").unpack("H16")
 => ["0cc175b9c0f1b6a8"]
 [7000413967451013937].pack("Q").unpack("H16")
@@ -611,7 +609,7 @@ We can play with `pack` and `unpack` a little bit more to confirm that these two
 
 We can also look at the actual 64 bits with `unpack('B64')`
 
-```
+``` ruby
 [12157170054180749580].pack('Q').unpack('B64')
 => ["0000110011000001011101011011100111000000111100011011011010101000"]
 [7000413967451013937].pack('Q').unpack('B64')
@@ -868,7 +866,7 @@ _listing 6.14: helper methods in the Dict class_
 
 Once we obtained the hash value, we need to convert it to an index within the boundaries of the backing array, with the modulo operation, or as we discussed earlier, the bitwise AND operation. Before doing that, we need to take into account which table the bucket should go into, if we're not in a rehashing state, it should go in the main table, if we are, it should go to the rehashing table.
 
-This process of first inspecting the main table, and the rehashing table, only if we're in rehashing in so common that we added a helper method for that, `iterate_through_hash_tables_unless_rehashing`.
+This process of first inspecting the main table, and the rehashing table, only if we're in rehashing state in so common that we added a helper method for that, `iterate_through_hash_tables_unless_rehashing`.
 
 This method replaces the common pattern in the Redis C codebase using a `for` loop and a conditional `break` statement at the end of the first iteration. We instead leverage the Ruby block syntax to always `yield` back the main table to the caller, and only `yield` the rehashing table if we're in a rehashing state.
 
@@ -1013,7 +1011,7 @@ def next_power(size)
   # That being said, let's still copy what Redis does, since it makes sense to have an
   # explicit limit about how big our Dicts can get
   i = INITIAL_SIZE
-  return MAX_SIZE if i > MAX_SIZE
+  return MAX_SIZE if size >= MAX_SIZE
 
   loop do
     return i if i >= size
@@ -1028,7 +1026,7 @@ end
 ```
 _listing 6.18: expand, next_power and rehashing? methods in the Dict class_
 
-Similarly to `resize`, if we're already in the process of rehashing, we can abort early. We also abort early is the number of items in the array is greater than the new size. In this case, there's no point in resizing the table, it would too small.
+Similarly to `resize`, if we're already in the process of rehashing, we can abort early. We also abort early if the number of items in the array is greater than the new size. In this case, there's no point in resizing the table, it would be too small.
 
 We use the `next_power` method to find the next power of two that is greater or equal to the new size. This method is used to maintain the size of the array as of power of two to leverage the bitwise AND operation to compute a modulo.
 
@@ -1092,7 +1090,7 @@ end
 ```
 _listing 6.19: rehashing related methods in the Dict class_
 
-`rehash_step` is a convenient method, it only calls `rehash` with the parameter 1. The parameter to `rehash` dictates how many items it will rehash, that is, move from the main table to the rehashing one. Let's look at the method one line at a time:
+`rehash_step` is a convenient method, it only calls `rehash` with the parameter 1. The parameter to `rehash` dictates how many items it will rehash, that is, move from the main table to the rehashing one. Let's look at the method one line at a time.
 
 We start by initializing the `empty_visits` variables to `n * 10`. `n`, the method parameter is the number of elements we want to move to the rehashing table. Because of the nature of a hash table, when iterating through the buckets, from the one at index 0 until the one at index `size - 1`, we don't know how many empty buckets we'll find. In order to prevent any potential slowness in the rehashing process, Redis uses an upper bound for the number of empty visits.
 
@@ -1185,7 +1183,7 @@ With small values like those it might not seem like a big difference, but as we 
 
 If the dictionaries need resizing, calling `resize`, which will find a good size for the dictionary and start the rehashing process.
 
-The next step is to call `rehash_milliseconds`. We've already explained why it's important for Redis to maintain an upper bound to all the operations that blocks other clients in the queue. By calling `rehash_milliseconds(1)`, Redis tries to do as much rehashing as possible and stops once one milliseconds has ellapsed. This means that in the most pessismistic scenario possible, a client would send a command right after Redis enters the `rehash_milliseconds(1)` call, effectively blocking this client for at least one millisecond. This behavior is considered acceptable by Redis, but it can be disabled through the `activerehashing` config value. We have not yet implemented any form of configuration so we will assume that all clients of our server are ok with this behavior.
+The next step is to call `rehash_milliseconds`. We've already explained why it's important for Redis to maintain an upper bound to all the operations that blocks other clients in the queue. By calling `rehash_milliseconds(1)`, Redis tries to do as much rehashing as possible and stops once one millisecond has ellapsed. This means that in the most pessismistic scenario possible, a client would send a command right after Redis enters the `rehash_milliseconds(1)` call, effectively blocking this client for at least one millisecond. This behavior is considered acceptable by Redis, but it can be disabled through the `activerehashing` config value. We have not yet implemented any form of configuration so we will assume that all clients of our server are ok with this behavior.
 
 ``` ruby
 # dict.rb
@@ -1573,7 +1571,7 @@ module SipHash
   end
 end
 ```
-_listing 6.27: A Ruby implementation of the shiphash algorithm_
+_listing 6.27: A Ruby implementation of the shiphash 1-2 algorithm_
 
 [java-doc-tree-map]:https://docs.oracle.com/javase/8/docs/api/java/util/TreeMap.html
 [wikipedia-hash-table]:https://en.wikipedia.org/wiki/Hash_table
@@ -1607,3 +1605,5 @@ _listing 6.27: A Ruby implementation of the shiphash algorithm_
 [c-malloc]:https://en.wikipedia.org/wiki/C_dynamic_memory_allocation
 [twos-complement]:https://en.wikipedia.org/wiki/Two%27s_complement
 [redis-doc-del]:https://redis.io/commands/del
+[redis-source-get-random-bytes]:https://github.com/antirez/redis/blob/6.0.0/src/util.c#L620
+[chapter-3]:/post/chapter-3-multiple-clients/
